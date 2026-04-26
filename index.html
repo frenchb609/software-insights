@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PDF Viewer</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <h1>PDF Viewer</h1>
+      </header>
+
+      <div class="main-content">
+        <!-- Sidebar for PDF list -->
+        <aside class="sidebar">
+          <div class="sidebar-header">
+            <h2>PDF Files</h2>
+            <div class="button-group">
+              <button
+                id="selectFolderBtn"
+                class="upload-btn"
+                title="Select the pdf folder">
+                📂 PDF Folder
+              </button>
+              <button
+                id="uploadBtn"
+                class="upload-btn"
+                title="Add individual PDF files">
+                ➕ Add PDFs
+              </button>
+            </div>
+            <input
+              type="file"
+              id="fileInput"
+              multiple
+              accept=".pdf"
+              style="display: none" />
+          </div>
+          <div id="pdfList" class="pdf-list">
+            <p class="no-pdfs">
+              No PDFs loaded. Click "Add PDFs" to select files.
+            </p>
+          </div>
+        </aside>
+
+        <!-- Main viewer area -->
+        <main class="viewer">
+          <div id="viewerContainer" class="viewer-container">
+            <div id="noSelection" class="no-selection">
+              <p>Select a PDF from the list to view</p>
+            </div>
+            <canvas
+              id="pdfCanvas"
+              style="display: none; border: 1px solid #ccc"></canvas>
+          </div>
+
+          <!-- PDF Controls -->
+          <div id="pdfControls" class="pdf-controls" style="display: none">
+            <div class="controls-group">
+              <button id="prevPage" class="control-btn">← Previous</button>
+              <div class="page-info">
+                <input type="number" id="pageNumber" min="1" value="1" />
+                <span id="totalPages"> / 1</span>
+              </div>
+              <button id="nextPage" class="control-btn">Next →</button>
+            </div>
+            <div class="controls-group">
+              <button id="zoomIn" class="control-btn">🔍+</button>
+              <button id="zoomOut" class="control-btn">🔍-</button>
+              <button id="zoomReset" class="control-btn">Reset</button>
+            </div>
+            <div class="controls-group">
+              <span id="currentZoom">100%</span>
+            </div>
+          </div>
+        </main>
+      </div>
+    </div>
+
+    <!-- PDF.js Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script>
+      // Set up PDF.js worker
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+    </script>
+
+    <script src="script.js"></script>
+  </body>
+</html>
