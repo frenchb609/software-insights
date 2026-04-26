@@ -30,8 +30,49 @@ const zoomResetBtn = document.getElementById("zoomReset");
 // Initialize
 document.addEventListener("DOMContentLoaded", () => {
   setupEventListeners();
-  loadPdfsFromFolder();
+  initializeApp();
 });
+
+async function initializeApp() {
+  // First, try to load PDFs from the pdf folder (for GitHub Pages and web servers)
+  const pdfsLoaded = await loadPdfsFromWebFolder();
+  if (pdfsLoaded) {
+    return;
+  }
+
+  // If web folder loading failed, try to restore folder handle from IndexedDB (local development)
+  const savedHandle = await restoreFolderHandle();
+
+  if (savedHandle) {
+    state.folderDirHandle = savedHandle;
+    try {
+      // Request permission to access the folder
+      const permission = await savedHandle.queryPermission({ mode: "read" });
+      if (permission === "granted") {
+        // Auto-load PDFs from the saved folder
+        await loadPdfsFromFolder();
+        return;
+      } else {
+        // Try to request permission again
+        const newPermission = await savedHandle.requestPermission({
+          mode: "read",
+        });
+        if (newPermission === "granted") {
+          await loadPdfsFromFolder();
+          return;
+        }
+      }
+    } catch (err) {
+      console.log("Could not access saved folder:", err);
+    }
+    // If we get here, clear the saved handle
+    await clearFolderHandle();
+    state.folderDirHandle = null;
+  }
+
+  // If no saved handle or it failed, show the prompt
+  displayPdfList(); // Show initial message
+}
 
 function setupEventListeners() {
   selectFolderBtn.addEventListener("click", selectPdfFolder);
@@ -44,6 +85,157 @@ function setupEventListeners() {
   zoomInBtn.addEventListener("click", () => changeZoom(1.2));
   zoomOutBtn.addEventListener("click", () => changeZoom(0.8));
   zoomResetBtn.addEventListener("click", resetZoom);
+}
+
+// IndexedDB helper functions
+async function saveFolderHandle(handle) {
+  try {
+    const db = await openDatabase();
+    const tx = db.transaction("folders", "readwrite");
+    const store = tx.objectStore("folders");
+    await store.put({ id: "pdfFolder", handle: handle });
+    console.log("Folder handle saved");
+  } catch (error) {
+    console.error("Error saving folder handle:", error);
+  }
+}
+
+async function restoreFolderHandle() {
+  try {
+    const db = await openDatabase();
+    const tx = db.transaction("folders", "readonly");
+    const store = tx.objectStore("folders");
+    const result = await store.get("pdfFolder");
+    return result ? result.handle : null;
+  } catch (error) {
+    console.error("Error restoring folder handle:", error);
+    return null;
+  }
+}
+
+async function clearFolderHandle() {
+  try {
+    const db = await openDatabase();
+    const tx = db.transaction("folders", "readwrite");
+    const store = tx.objectStore("folders");
+    await store.delete("pdfFolder");
+    console.log("Folder handle cleared");
+  } catch (error) {
+    console.error("Error clearing folder handle:", error);
+  }
+}
+
+function openDatabase() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open("PDFViewerDB", 1);
+
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve(request.result);
+
+    request.onupgradeneeded = (event) => {
+      const db = event.target.result;
+      if (!db.objectStoreNames.contains("folders")) {
+        db.createObjectStore("folders");
+      }
+    };
+  });
+}
+
+// Load PDFs from web folder (GitHub Pages, web servers, etc.)
+async function loadPdfsFromWebFolder() {
+  try {
+    // Try to fetch the PDF list from pdfs.json
+    const response = await fetch("./pdf/pdfs.json");
+    if (!response.ok) {
+      console.log("pdfs.json not found, trying alternative methods...");
+      // Try alternative: fetch from GitHub API if available
+      const githubPdfs = await loadPdfsFromGitHub();
+      if (githubPdfs && githubPdfs.length > 0) {
+        state.pdfList = githubPdfs;
+        displayPdfList();
+        return true;
+      }
+      return false;
+    }
+
+    const pdfList = await response.json();
+
+    // Fetch each PDF as a blob and add to the list
+    for (const pdfName of pdfList) {
+      try {
+        const pdfResponse = await fetch(`./pdf/${pdfName}`);
+        if (!pdfResponse.ok) {
+          console.error(`Failed to fetch ${pdfName}`);
+          continue;
+        }
+
+        const blob = await pdfResponse.blob();
+        const file = new File([blob], pdfName, { type: "application/pdf" });
+
+        state.pdfList.push({
+          name: pdfName,
+          file: file,
+          fromFolder: true,
+        });
+      } catch (err) {
+        console.error(`Error loading PDF ${pdfName}:`, err);
+      }
+    }
+
+    // Sort by name
+    state.pdfList.sort((a, b) => a.name.localeCompare(b.name));
+
+    if (state.pdfList.length > 0) {
+      displayPdfList();
+      console.log(`Loaded ${state.pdfList.length} PDFs from web folder`);
+      return true;
+    }
+
+    return false;
+  } catch (error) {
+    console.log("Could not load PDFs from web folder:", error.message);
+    return false;
+  }
+}
+
+// Try to load PDFs from GitHub API (for repositories)
+async function loadPdfsFromGitHub() {
+  try {
+    // Get the GitHub repo info from the page URL or use a default
+    const pathParts = window.location.pathname.split("/").filter((p) => p);
+
+    // GitHub Pages structure: /username/repo-name/
+    if (pathParts.length < 2) {
+      return null; // Not a GitHub Pages site
+    }
+
+    const owner = pathParts[0];
+    const repo = pathParts[1];
+
+    // Use GitHub API to list files in pdf folder
+    const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/pdf`;
+    const response = await fetch(apiUrl);
+
+    if (!response.ok) {
+      console.log("GitHub API not available or repository not found");
+      return null;
+    }
+
+    const contents = await response.json();
+    const pdfNames = contents
+      .filter(
+        (item) =>
+          item.type === "file" && item.name.toLowerCase().endsWith(".pdf"),
+      )
+      .map((item) => item.name)
+      .sort();
+
+    console.log(`Found ${pdfNames.length} PDFs via GitHub API`);
+    return pdfNames;
+  } catch (error) {
+    console.log("GitHub API method failed:", error.message);
+    return null;
+  }
 }
 
 // Select PDF folder using File System Access API
@@ -61,16 +253,20 @@ async function selectPdfFolder() {
     const dirHandle = await window.showDirectoryPicker();
     state.folderDirHandle = dirHandle;
 
-    // Save folder reference to localStorage for persistence
+    // Request permission
     try {
       const permission = await dirHandle.requestPermission({ mode: "read" });
       if (permission !== "granted") {
         alert("Permission denied to access the folder");
+        state.folderDirHandle = null;
         return;
       }
     } catch (err) {
       console.log("Permission request not supported, proceeding anyway");
     }
+
+    // Save folder handle to IndexedDB for auto-load on next visit
+    await saveFolderHandle(dirHandle);
 
     // Load PDFs from the selected folder
     await loadPdfsFromFolder();
